@@ -1,0 +1,127 @@
+# DPAR (Dynamic Policy and Access Rules) Configuration
+# This file defines the security policies and access rules for the application
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dpar-config
+  namespace: default
+data:
+  # Security policies
+  security-policies.yaml: |
+    policies:
+      - name: "rate-limiting"
+        type: "rate-limit"
+        rules:
+          - path: "/events"
+            method: "POST"
+            limit: 100
+            window: "1m"
+            burst: 20
+          - path: "/events/batch"
+            method: "POST"
+            limit: 10
+            window: "1m"
+            burst: 5
+      
+      - name: "authentication"
+        type: "auth"
+        rules:
+          - path: "/events*"
+            method: "POST"
+            auth_type: "api-key"
+            required: true
+          - path: "/health"
+            method: "GET"
+            auth_type: "none"
+            required: false
+      
+      - name: "cors"
+        type: "cors"
+        rules:
+          - allowed_origins: ["*"]
+            allowed_methods: ["GET", "POST", "OPTIONS"]
+            allowed_headers: ["Content-Type", "Authorization", "X-API-Key"]
+            max_age: 3600
+      
+      - name: "request-validation"
+        type: "validation"
+        rules:
+          - path: "/events"
+            method: "POST"
+            max_payload_size: "1MB"
+            required_headers: ["Content-Type"]
+            allowed_content_types: ["application/json"]
+      
+      - name: "ip-whitelist"
+        type: "ip-filter"
+        rules:
+          - path: "/events*"
+            allowed_ips: ["0.0.0.0/0"]  # Configure with specific IPs in production
+            blocked_ips: []
+  
+  # Access rules
+  access-rules.yaml: |
+    rules:
+      - name: "api-access"
+        type: "api-key"
+        description: "API key for event generation"
+        permissions:
+          - "events:create"
+          - "events:batch"
+        rate_limits:
+          - endpoint: "/events"
+            limit: 100
+            window: "1m"
+          - endpoint: "/events/batch"
+            limit: 10
+            window: "1m"
+      
+      - name: "health-check"
+        type: "public"
+        description: "Public access for health checks"
+        permissions:
+          - "health:read"
+        rate_limits:
+          - endpoint: "/health"
+            limit: 1000
+            window: "1m"
+      
+      - name: "monitoring"
+        type: "service-account"
+        description: "Service account for monitoring"
+        permissions:
+          - "health:read"
+          - "metrics:read"
+        rate_limits:
+          - endpoint: "/health"
+            limit: 100
+            window: "1m"
+  
+  # Service Bus access policies
+  service-bus-policies.yaml: |
+    policies:
+      - name: "event-sender"
+        type: "service-bus"
+        permissions:
+          - "Send"
+        resources:
+          - queue: "events"
+          - topic: "events-topic"
+        conditions:
+          - field: "event_type"
+            operator: "in"
+            values: ["user_action", "system_event", "business_event"]
+      
+      - name: "event-receiver"
+        type: "service-bus"
+        permissions:
+          - "Listen"
+          - "Manage"
+        resources:
+          - queue: "events"
+          - topic: "events-topic"
+        conditions:
+          - field: "source"
+            operator: "equals"
+            value: "api"
